@@ -12,7 +12,9 @@ from datetime import datetime
 import time, random, string
 
 app = Flask(__name__)
-app.secret_key = "cybershield-secret-key-change-in-production"
+import os
+app.secret_key = os.environ.get("SECRET_KEY", "cybershield-secret-key-change-in-production")
+#app.secret_key = "cybershield-secret-key-change-in-production"
 
 # ─── ACCOUNTS ────────────────────────────────────────────────────
 ACCOUNTS = {
@@ -287,4 +289,5 @@ def api_admin_incidents():
     return jsonify({"incidents": all_inc})
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5050)
+    #app.run(debug=True, port=5050)
+    app.run(debug=False)
