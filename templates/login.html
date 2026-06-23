@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CyberShield — Sign In</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+
+<div class="login-wrap">
+  <div class="login-card">
+
+    <div class="login-brand">
+      <div class="brand-icon">🛡</div>
+      <div>
+        <div class="brand-name">CyberShield</div>
+        <div class="brand-sub">Cybersecurity Awareness Platform</div>
+      </div>
+    </div>
+
+    <div class="login-divider"></div>
+
+    <form id="loginForm" autocomplete="off">
+      <div class="field-group">
+        <label class="field-label" for="username">Username</label>
+        <input class="field-input" type="text" id="username" name="username"
+               placeholder="Enter your username" autocomplete="username" required>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="password">Password</label>
+        <div class="pwd-wrap">
+          <input class="field-input" type="password" id="password" name="password"
+                 placeholder="Enter your password" autocomplete="current-password" required>
+          <button type="button" class="pwd-toggle" onclick="togglePwd()" aria-label="Show password">
+            <span id="eyeIcon">👁</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="login-error" id="loginErr" style="display:none"></div>
+
+      <button class="btn-signin" type="submit" id="signinBtn">
+        <span id="signinLabel">Sign In</span>
+        <span id="signinSpinner" style="display:none">Signing in…</span>
+      </button>
+    </form>
+
+    <div class="login-footer">
+      Contact your IT administrator if you've forgotten your credentials.
+    </div>
+  </div>
+
+  <div class="login-aside">
+    <div class="aside-inner">
+      <div class="aside-tag">Platform Capabilities</div>
+      <h2 class="aside-headline">Protect your organisation from within.</h2>
+      <p class="aside-body">CyberShield gives every employee the knowledge to recognise threats, and gives administrators the visibility to act on them.</p>
+      <div class="feature-list">
+        <div class="feature-item"><span class="fi-dot fi-blue"></span>Interactive training modules</div>
+        <div class="feature-item"><span class="fi-dot fi-purple"></span>Knowledge assessment quizzes</div>
+        <div class="feature-item"><span class="fi-dot fi-green"></span>Real-time incident reporting</div>
+        <div class="feature-item"><span class="fi-dot fi-amber"></span>Live threat intelligence feed</div>
+        <div class="feature-item"><span class="fi-dot fi-red"></span>Admin analytics dashboard</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('signinBtn');
+  document.getElementById('signinLabel').style.display = 'none';
+  document.getElementById('signinSpinner').style.display = 'inline';
+  document.getElementById('loginErr').style.display = 'none';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = '/dashboard';
+    } else {
+      showErr(data.error || 'Invalid credentials.');
+    }
+  } catch {
+    showErr('Connection error. Please try again.');
+  }
+});
+
+function showErr(msg) {
+  const el = document.getElementById('loginErr');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('signinLabel').style.display = 'inline';
+  document.getElementById('signinSpinner').style.display = 'none';
+  document.getElementById('signinBtn').disabled = false;
+}
+
+function togglePwd() {
+  const inp = document.getElementById('password');
+  const icon = document.getElementById('eyeIcon');
+  if (inp.type === 'password') { inp.type = 'text'; icon.textContent = '🙈'; }
+  else { inp.type = 'password'; icon.textContent = '👁'; }
+}
+</script>
+</body>
+</html>

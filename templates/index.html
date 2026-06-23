@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CyberShield — Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <span class="tb-icon">🛡</span>
+    <span class="tb-name">CyberShield</span>
+  </div>
+  <div class="topbar-right">
+    <div class="tb-user">
+      <div class="tb-avatar" id="tbAvatar"></div>
+      <div class="tb-meta">
+        <div class="tb-uname" id="tbName">{{ name }}</div>
+        <div class="tb-role" id="tbRole"></div>
+      </div>
+    </div>
+    <button class="btn-signout" onclick="signOut()">Sign Out</button>
+  </div>
+</header>
+
+<!-- LAYOUT -->
+<div class="app-layout">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar" id="sidebar">
+    <!-- Built by JS based on role -->
+  </nav>
+
+  <!-- MAIN -->
+  <main class="main-area" id="mainArea">
+    <div class="page-loading">Loading…</div>
+  </main>
+
+</div>
+
+<!-- MODULE MODAL -->
+<div class="modal-overlay" id="modModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modTitle"></h3>
+      <button class="modal-x" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modBody"></div>
+    <div class="modal-foot">
+      <button class="btn-primary" onclick="markDone()">Mark as Complete ✓</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const ROLE = "{{ role }}";
+const USERNAME = "{{ user }}";
+
+const EMP_NAV = [
+  { id:'learn',  icon:'📚', label:'Learn' },
+  { id:'quiz',   icon:'📝', label:'Quiz' },
+  { id:'pwd',    icon:'🔑', label:'Password Check' },
+  { id:'report', icon:'🚨', label:'Report Incident' },
+];
+
+const ADMIN_NAV = [
+  { id:'overview',  icon:'📊', label:'Overview' },
+  { id:'employees', icon:'👥', label:'Employees' },
+  { id:'answers',   icon:'📝', label:'Quiz Answers' },
+  { id:'incidents', icon:'🚨', label:'Incidents' },
+  { id:'feed',      icon:'📰', label:'Cyber News Feed' },
+];
+
+let currentPage = ROLE === 'admin' ? 'overview' : 'learn';
+let feedTimer = null;
+
+// ─── INIT ────────────────────────────────────────────────────────
+(function init() {
+  const nav = ROLE === 'admin' ? ADMIN_NAV : EMP_NAV;
+  buildSidebar(nav);
+  renderPage();
+
+  // Set topbar
+  const nameEl = document.getElementById('tbName');
+  nameEl.textContent = nameEl.textContent; // already server-rendered
+  document.getElementById('tbRole').textContent = ROLE === 'admin' ? 'Administrator' : 'Employee';
+  document.getElementById('tbAvatar').textContent = nameEl.textContent.charAt(0).toUpperCase();
+  document.getElementById('tbRole').classList.add(ROLE === 'admin' ? 'role-admin' : 'role-emp');
+})();
+
+function buildSidebar(nav) {
+  const sb = document.getElementById('sidebar');
+  sb.innerHTML = nav.map(n => `
+    <div class="nav-item ${n.id===currentPage?'active':''}" onclick="goPage('${n.id}')">
+      <span class="nav-icon">${n.icon}</span>
+      <span class="nav-label">${n.label}</span>
+    </div>`).join('');
+}
+
+function goPage(id) {
+  clearInterval(feedTimer);
+  currentPage = id;
+  const nav = ROLE === 'admin' ? ADMIN_NAV : EMP_NAV;
+  buildSidebar(nav);
+  renderPage();
+}
+
+function renderPage() {
+  if (ROLE === 'admin') renderAdminPage();
+  else renderEmpPage();
+}
+
+async function signOut() {
+  await fetch('/api/logout', { method:'POST' });
+  window.location.href = '/';
+}
+
+// ─── EMPLOYEE PAGES ───────────────────────────────────────────────
+async function renderEmpPage() {
+  const m = document.getElementById('mainArea');
+  if (currentPage === 'learn')  { const d = await apiFetch('/api/modules'); renderLearn(d); }
+  if (currentPage === 'quiz')   { const d = await apiFetch('/api/quiz');    renderQuiz(d); }
+  if (currentPage === 'pwd')    renderPwd();
+  if (currentPage === 'report') { m.innerHTML = reportHTML(); setTimeout(loadThreatFeed, 80); feedTimer = setInterval(loadThreatFeed, 300000); }
+}
+
+function renderLearn(data) {
+  const done = data.completed;
+  const total = data.modules.length;
+  const pct = Math.round(done.length / total * 100);
+  let h = `<div class="page-head"><h2>📚 Learning Modules</h2></div>
+  <div class="progress-card">
+    <div class="pc-top"><span class="pc-label">Your Progress</span><span class="pc-frac">${done.length} / ${total} modules</span></div>
+    <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+    <div class="pc-pct">${pct}%</div>
+  </div>
+  <div class="module-grid">`;
+  data.modules.forEach(m => {
+    const isDone = done.includes(m.id);
+    h += `<div class="module-card ${isDone?'mc-done':''}">
+      <div class="mc-icon">${m.icon}</div>
+      <div class="mc-body">
+        <div class="mc-title">${m.title}</div>
+        <div class="mc-desc">${m.desc}</div>
+      </div>
+      <div class="mc-action">
+        ${isDone
+          ? '<span class="chip chip-green">✓ Done</span>'
+          : `<button class="btn-start" onclick="openModule('${m.id}','${m.title.replace(/'/g,"\\'")}')">Start →</button>`}
+      </div>
+    </div>`;
+  });
+  h += `</div>`;
+  document.getElementById('mainArea').innerHTML = h;
+}
+
+function renderQuiz(data) {
+  const m = document.getElementById('mainArea');
+  if (data.submitted) {
+    const pct = Math.round(data.score / data.total * 100);
+    const pass = pct >= 60;
+    let h = `<div class="page-head"><h2>📝 Cybersecurity Quiz</h2></div>
+    <div class="quiz-result-card">
+      <div class="qr-score" style="color:${pass?'#34d399':'#f87171'}">${pct}%</div>
+      <div class="qr-label">${data.score} / ${data.total} correct</div>
+      <div class="qr-badge ${pass?'badge-pass':'badge-fail'}">${pass?'✅ Passed':'❌ Below passing score (60%)'}</div>
+      <button class="btn-secondary" onclick="retakeQuiz()" style="margin-top:16px;">Retake Quiz</button>
+    </div>
+    <div class="quiz-review">
+      <div class="section-label">Your Answers</div>`;
+    data.questions.forEach((q,i) => {
+      const ua = data.answers[i];
+      const correct = ua === data.correct_answers[i];
+      h += `<div class="rev-item">
+        <div class="rev-q">Q${i+1}: ${q.q}</div>
+        <div class="rev-ans ${correct?'rev-ok':'rev-wrong'}">
+          ${correct?'✓':'✗'} ${q.opts[ua]}
+          ${!correct ? `<span style="color:#64748b;font-size:.82rem;"> — Correct: ${q.opts[data.correct_answers[i]]}</span>` : ''}
+        </div>
+      </div>`;
+    });
+    h += `</div>`;
+    m.innerHTML = h;
+    return;
+  }
+
+  let h = `<div class="page-head"><h2>📝 Cybersecurity Quiz</h2></div>
+  <div class="quiz-card">
+    <div class="quiz-intro">Answer all ${data.total} questions and submit when ready.</div>`;
+  data.questions.forEach((q,i) => {
+    h += `<div class="quiz-qblock">
+      <div class="quiz-qnum">Q${i+1}</div>
+      <div class="quiz-qtext">${q.q}</div>
+      <div class="quiz-opts">`;
+    q.opts.forEach((opt,j) => {
+      h += `<label class="quiz-opt"><input type="radio" name="q${i}" value="${j}"> <span>${opt}</span></label>`;
+    });
+    h += `</div></div>`;
+  });
+  h += `<button class="btn-primary" style="margin-top:8px;" onclick="submitQuiz()">Submit Quiz →</button>
+  </div>`;
+  m.innerHTML = h;
+}
+
+async function submitQuiz() {
+  const answers = [];
+  let allAnswered = true;
+  // detect how many questions by looking for radio groups
+  let i = 0;
+  while (true) {
+    const sel = document.querySelector(`input[name="q${i}"]:checked`);
+    const any = document.querySelector(`input[name="q${i}"]`);
+    if (!any) break;
+    if (!sel) { allAnswered = false; break; }
+    answers.push(parseInt(sel.value));
+    i++;
+  }
+  if (!allAnswered) { alert('Please answer all questions before submitting.'); return; }
+  await apiFetch('/api/quiz/submit', 'POST', { answers });
+  const d = await apiFetch('/api/quiz');
+  renderQuiz(d);
+}
+
+async function retakeQuiz() {
+  await apiFetch('/api/quiz/reset', 'POST');
+  const d = await apiFetch('/api/quiz');
+  renderQuiz(d);
+}
+
+function renderPwd() {
+  document.getElementById('mainArea').innerHTML = `
+  <div class="page-head"><h2>🔑 Password Strength Checker</h2></div>
+  <div class="pwd-card">
+    <p class="pwd-note">Check how strong your password is — nothing is stored or sent.</p>
+    <input class="field-input" type="password" id="pwdField" placeholder="Type a test password…" oninput="checkPwd()">
+    <div class="prog-track" style="margin:12px 0 4px"><div class="prog-fill" id="pwdBar" style="width:0%;transition:.4s"></div></div>
+    <div class="pwd-strength" id="pwdStrength">Enter a password above</div>
+    <ul class="pwd-criteria" id="pwdCriteria">
+      <li id="c1">✗ At least 8 characters</li>
+      <li id="c2">✗ Uppercase letter (A–Z)</li>
+      <li id="c3">✗ Lowercase letter (a–z)</li>
+      <li id="c4">✗ Number (0–9)</li>
+      <li id="c5">✗ Special character (!@#$…)</li>
+      <li id="c6">✗ 12+ characters (recommended)</li>
+    </ul>
+  </div>`;
+}
+
+function checkPwd() {
+  const v = document.getElementById('pwdField').value;
+  const checks = [v.length>=8, /[A-Z]/.test(v), /[a-z]/.test(v), /\d/.test(v), /[^a-zA-Z0-9]/.test(v), v.length>=12];
+  checks.forEach((ok,i) => {
+    const el = document.getElementById('c'+(i+1));
+    el.textContent = (ok?'✓':'✗') + el.textContent.slice(1);
+    el.className = ok ? 'c-ok' : '';
+  });
+  const score = checks.filter(Boolean).length;
+  document.getElementById('pwdBar').style.width = Math.round(score/6*100)+'%';
+  const labels = ['','Very Weak','Weak','Fair','Good','Strong','Very Strong'];
+  const colors = ['','#f87171','#fb923c','#fbbf24','#a3e635','#34d399','#22d3ee'];
+  const el = document.getElementById('pwdStrength');
+  el.textContent = v ? labels[score] : 'Enter a password above';
+  el.style.color = v ? colors[score] : '#64748b';
+}
+
+function reportHTML() {
+  return `<div class="page-head"><h2>🚨 Report a Security Incident</h2></div>
+  <div class="report-layout">
+    <div class="report-form-card">
+
+      <div class="step-section">
+        <div class="step-hd"><span class="step-badge">01</span><span class="step-title">Incident Type *</span></div>
+        <div class="type-grid" id="typeGrid">
+          ${[['🎣','Phishing Email'],['🔗','Suspicious Link'],['🦠','Malware / Virus'],['📱','Lost / Stolen Device'],
+             ['🔓','Unauthorised Access'],['📂','Data Breach'],['💰','Ransomware'],['❓','Other']]
+            .map(([ic,lb]) => `<label class="type-card" onclick="pickType(this)">
+              <input type="radio" name="itype" value="${lb}"> ${ic} <span>${lb}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+
+      <div class="step-section">
+        <div class="step-hd"><span class="step-badge">02</span><span class="step-title">Severity *</span></div>
+        <div class="sev-row">
+          <div class="sev-btn s-low"  onclick="pickSev(this,'Low')">🟢 Low</div>
+          <div class="sev-btn s-med"  onclick="pickSev(this,'Medium')">🟡 Medium</div>
+          <div class="sev-btn s-high" onclick="pickSev(this,'High')">🟠 High</div>
+          <div class="sev-btn s-crit" onclick="pickSev(this,'Critical')">🔴 Critical</div>
+        </div>
+        <input type="hidden" id="sevVal" value="">
+      </div>
+
+      <div class="step-section">
+        <div class="step-hd"><span class="step-badge">03</span><span class="step-title">When & Where *</span></div>
+        <div class="two-col">
+          <div class="field-group"><label class="field-label">Date</label>
+            <input class="field-input" type="date" id="incDate" value="${new Date().toISOString().split('T')[0]}"></div>
+          <div class="field-group"><label class="field-label">Approx. Time</label>
+            <input class="field-input" type="time" id="incTime"></div>
+        </div>
+        <div class="field-group"><label class="field-label">System / Location Affected</label>
+          <input class="field-input" type="text" id="incLoc" placeholder="e.g. Work laptop, email account…"></div>
+      </div>
+
+      <div class="step-section">
+        <div class="step-hd"><span class="step-badge">04</span><span class="step-title">Description *</span></div>
+        <div class="field-group">
+          <textarea class="field-input" id="incDesc" style="min-height:100px;resize:vertical"
+            placeholder="Describe exactly what happened — include links, error messages, or anything unusual…"
+            oninput="updChar()"></textarea>
+          <div class="char-note" id="charNote">0 / 500</div>
+        </div>
+      </div>
+
+      <div class="step-section">
+        <div class="step-hd"><span class="step-badge">05</span><span class="step-title">Actions Taken</span></div>
+        ${[['a1','Disconnected device from the network'],['a2','Changed my password immediately'],
+           ['a3','Did NOT click the suspicious link'],['a4','Took a screenshot of the incident'],
+           ['a5','Notified a manager verbally'],['a6','Did not attempt to fix the issue myself']]
+          .map(([id,lbl]) => `<label class="chk-row"><input type="checkbox" id="${id}"> ${lbl}</label>`).join('')}
+      </div>
+
+      <div class="step-section">
+        <div class="step-hd"><span class="step-badge">06</span><span class="step-title">Additional Details</span></div>
+        <div class="field-group"><label class="field-label">Others affected?</label>
+          <select class="field-input" id="incOthers">
+            <option value="">— Select —</option>
+            <option>No, just me</option><option>Yes — 1 other person</option>
+            <option>Yes — multiple people</option><option>Unknown</option>
+          </select></div>
+        <div class="field-group"><label class="field-label">Sensitive data potentially exposed?</label>
+          <select class="field-input" id="incData">
+            <option value="">— Select —</option>
+            <option>No</option><option>Yes — customer data</option>
+            <option>Yes — company financial data</option><option>Yes — employee personal data</option>
+            <option>Possibly — unsure</option>
+          </select></div>
+        <div class="field-group"><label class="field-label">Other details (optional)</label>
+          <textarea class="field-input" id="incExtra" style="min-height:70px;resize:vertical"
+            placeholder="Sender email, suspicious URL, error messages…"></textarea></div>
+      </div>
+
+      <button class="btn-primary btn-full" onclick="submitInc()">🚨 Submit Incident Report</button>
+      <div class="inc-ok" id="incOk" style="display:none">
+        ✅ Report submitted. Reference: <b id="incRef"></b>
+      </div>
+    </div>
+
+    <!-- THREAT INTEL PANEL -->
+    <aside class="threat-panel">
+      <div class="tp-head">
+        <span class="tp-title"><span class="live-dot"></span> Threat Intelligence</span>
+        <button class="btn-refresh" onclick="loadThreatFeed()">⟳ Refresh</button>
+      </div>
+      <div class="tp-note">Live cybersecurity alerts — auto-refreshes every 5 min.</div>
+      <div id="threatWrap"><div class="feed-load">Loading…</div></div>
+    </aside>
+  </div>`;
+}
+
+let selSev = '';
+function pickType(el) {
+  document.querySelectorAll('#typeGrid .type-card').forEach(c => c.classList.remove('tc-sel'));
+  el.classList.add('tc-sel');
+}
+function pickSev(el, val) {
+  document.querySelectorAll('.sev-btn').forEach(c => c.classList.remove('sv-sel'));
+  el.classList.add('sv-sel');
+  selSev = val;
+  document.getElementById('sevVal').value = val;
+}
+function updChar() {
+  const v = document.getElementById('incDesc').value;
+  document.getElementById('charNote').textContent = v.length + ' / 500';
+}
+
+async function submitInc() {
+  const typeEl = document.querySelector('#typeGrid input:checked');
+  const desc = document.getElementById('incDesc')?.value.trim();
+  const sev = document.getElementById('sevVal')?.value;
+  if (!typeEl) { alert('Please select an incident type.'); return; }
+  if (!sev)    { alert('Please select a severity level.'); return; }
+  if (!desc)   { alert('Please describe the incident.'); return; }
+
+  const payload = {
+    type: typeEl.value, severity: sev, description: desc,
+    date: document.getElementById('incDate').value,
+    time: document.getElementById('incTime').value,
+    location: document.getElementById('incLoc').value,
+    othersAffected: document.getElementById('incOthers').value,
+    dataExposed: document.getElementById('incData').value,
+    extra: document.getElementById('incExtra').value,
+    actionsTaken: ['a1','a2','a3','a4','a5','a6'].map(id => document.getElementById(id)?.checked || false)
+  };
+
+  const res = await apiFetch('/api/incidents', 'POST', payload);
+  document.getElementById('incRef').textContent = res.ref;
+  document.getElementById('incOk').style.display = 'block';
+  document.getElementById('incOk').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  // Reset form
+  document.getElementById('incDesc').value = '';
+  document.getElementById('incExtra').value = '';
+  document.getElementById('sevVal').value = ''; selSev = '';
+  document.querySelectorAll('.sev-btn').forEach(c => c.classList.remove('sv-sel'));
+  document.querySelectorAll('#typeGrid .type-card').forEach(c => c.classList.remove('tc-sel'));
+  document.querySelectorAll('#typeGrid input').forEach(c => c.checked = false);
+  updChar();
+}
+
+// ─── THREAT FEED ─────────────────────────────────────────────────
+const FEEDS = [
+  { url:'https://www.cisa.gov/cybersecurity-advisories.xml', tag:'CISA' },
+  { url:'https://www.bleepingcomputer.com/feed/', tag:'BleepingComp' },
+  { url:'https://feeds.feedburner.com/TheHackersNews', tag:'THN' }
+];
+
+function sevFromTitle(title, src) {
+  if (src==='CISA' || /ransomware|zero-day|critical|exploit|breach|vulnerability/i.test(title)) return ['CRITICAL','sev-crit'];
+  if (/hack|attack|malware|flaw|backdoor/i.test(title)) return ['HIGH','sev-high'];
+  if (/phishing|password|credential/i.test(title)) return ['MEDIUM','sev-med'];
+  return ['INFO','sev-info'];
+}
+
+async function loadThreatFeed() {
+  const wrap = document.getElementById('threatWrap');
+  if (!wrap) return;
+  try {
+    const all = (await Promise.all(FEEDS.map(f =>
+      fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(f.url)}`)
+        .then(r=>r.json())
+        .then(d => d.status==='ok' ? d.items.map(i=>({title:i.title,url:i.link,pub:new Date(i.pubDate),src:f.tag})) : [])
+        .catch(()=>[])
+    ))).flat().sort((a,b)=>b.pub-a.pub).slice(0,10);
+
+    if (!all.length) { wrap.innerHTML = '<div class="feed-load" style="color:#fbbf24">No alerts found.</div>'; return; }
+    wrap.innerHTML = all.map(s => {
+      const [label, cls] = sevFromTitle(s.title, s.src);
+      const hAgo = Math.max(0, Math.round((new Date()-s.pub)/3600000));
+      const time = hAgo===0?'Just now':`${hAgo}h ago`;
+      return `<div class="tc-card">
+        <div class="tc-top"><span class="tc-tag ${cls}">${label}</span><span class="tc-src">[${s.src}]</span></div>
+        <a class="tc-title" href="${s.url}" target="_blank" rel="noopener">${s.title}</a>
+        <div class="tc-meta">🕒 ${time}</div>
+      </div>`;
+    }).join('');
+  } catch { wrap.innerHTML = '<div class="feed-load" style="color:#f87171">Could not load threat intelligence.</div>'; }
+}
+
+// ─── ADMIN PAGES ──────────────────────────────────────────────────
+async function renderAdminPage() {
+  const m = document.getElementById('mainArea');
+  if (currentPage === 'overview')  { const d = await apiFetch('/api/admin/overview');   renderOverview(d); }
+  if (currentPage === 'employees') { const d = await apiFetch('/api/admin/overview');   renderEmployees(d); }
+  if (currentPage === 'answers')   { const d = await apiFetch('/api/admin/quiz-answers'); renderAnswers(d); }
+  if (currentPage === 'incidents') { const d = await apiFetch('/api/admin/incidents');  renderIncidents(d); }
+  if (currentPage === 'feed')      { m.innerHTML = '<div class="page-head"><h2>📰 Cybersecurity News Feed</h2></div><div id="feedWrap"><div class="feed-load">Loading…</div></div>'; loadAdminFeed(); feedTimer = setInterval(loadAdminFeed, 300000); }
+}
+
+function renderOverview(d) {
+  let h = `<div class="page-head"><h2>📊 Admin Overview</h2></div>
+  <div class="stat-grid">
+    <div class="stat-card"><div class="sc-val">${d.avg_mods}%</div><div class="sc-lbl">Avg Module Completion</div></div>
+    <div class="stat-card"><div class="sc-val">${d.avg_quiz}%</div><div class="sc-lbl">Avg Quiz Score</div></div>
+    <div class="stat-card"><div class="sc-val" style="color:#f87171">${d.open_incidents}</div><div class="sc-lbl">Open Incidents</div></div>
+    <div class="stat-card"><div class="sc-val" style="color:#34d399">${d.employee_count}</div><div class="sc-lbl">Active Employees</div></div>
+  </div>
+  <div class="section-label" style="margin-top:28px;">Employee Summary</div>
+  <table class="data-table"><thead><tr><th>Employee</th><th>Modules Done</th><th>Quiz Score</th><th>Status</th><th>Incidents</th></tr></thead><tbody>`;
+  d.rows.forEach(r => {
+    const qpct = r.quiz_pct;
+    h += `<tr>
+      <td>${r.name}</td>
+      <td>${r.modules_done} / ${r.modules_total}</td>
+      <td>${qpct!==null ? qpct+'%' : '—'}</td>
+      <td>${qpct===null?'<span class="chip chip-yellow">Pending</span>':qpct>=60?'<span class="chip chip-green">Passed</span>':'<span class="chip chip-red">Failed</span>'}</td>
+      <td>${r.incidents}</td>
+    </tr>`;
+  });
+  h += '</tbody></table>';
+  document.getElementById('mainArea').innerHTML = h;
+}
+
+function renderEmployees(d) {
+  let h = `<div class="page-head"><h2>👥 Employees</h2></div>`;
+  d.rows.forEach(r => {
+    const pct = Math.round(r.modules_done / r.modules_total * 100);
+    const qpct = r.quiz_pct;
+    h += `<div class="emp-card">
+      <div class="ec-head">
+        <div class="ec-avatar">${r.name.charAt(0)}</div>
+        <div><div class="ec-name">${r.name}</div><div class="ec-user">@${r.username}</div></div>
+        <div style="margin-left:auto">
+          ${qpct===null?'<span class="chip chip-yellow">Quiz Pending</span>':qpct>=60?'<span class="chip chip-green">On Track</span>':'<span class="chip chip-red">Needs Training</span>'}
+        </div>
+      </div>
+      <div class="ec-prog-lbl">Module completion — ${r.modules_done} / ${r.modules_total}</div>
+      <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  });
+  document.getElementById('mainArea').innerHTML = h;
+}
+
+function renderAnswers(d) {
+  let h = `<div class="page-head"><h2>📝 Quiz Answers</h2></div>`;
+  if (!d.data.length) { h += '<div class="empty-state">No employees have completed the quiz yet.</div>'; document.getElementById('mainArea').innerHTML=h; return; }
+  d.data.forEach(e => {
+    h += `<div class="ans-block">
+      <div class="ab-head">
+        <span>${e.name}</span>
+        <span class="chip ${e.pct>=60?'chip-green':'chip-red'}">${e.pct}% — ${e.pct>=60?'Passed':'Failed'}</span>
+        <span class="ab-date">${new Date(e.date).toLocaleDateString()}</span>
+      </div>`;
+    e.questions.forEach((q,i) => {
+      const ua = e.answers[i];
+      const ok = ua === e.correct[i];
+      h += `<div class="ans-row">
+        <span class="ar-q">Q${i+1}: ${q}</span>
+        <span class="ar-a ${ok?'ar-ok':'ar-wrong'}">${ok?'✓':'✗'} ${e.opts[i][ua]}</span>
+      </div>`;
+    });
+    h += `</div>`;
+  });
+  document.getElementById('mainArea').innerHTML = h;
+}
+
+function renderIncidents(d) {
+  let h = `<div class="page-head"><h2>🚨 Reported Incidents</h2></div>`;
+  if (!d.incidents.length) { h += '<div class="empty-state">No incidents have been reported yet.</div>'; document.getElementById('mainArea').innerHTML=h; return; }
+  h += `<table class="data-table"><thead><tr><th>Date</th><th>Reporter</th><th>Type</th><th>Severity</th><th>Description</th><th>Status</th></tr></thead><tbody>`;
+  d.incidents.forEach(i => {
+    const sc = {Low:'chip-green',Medium:'chip-yellow',High:'chip-red',Critical:'chip-red'}[i.severity]||'chip-blue';
+    h += `<tr>
+      <td style="font-size:.8rem;color:#94a3b8">${new Date(i.date).toLocaleDateString()}</td>
+      <td>${i.reporter_name}</td><td>${i.type}</td>
+      <td><span class="chip ${sc}">${i.severity}</span></td>
+      <td style="max-width:200px;font-size:.83rem">${i.description.slice(0,80)}${i.description.length>80?'…':''}</td>
+      <td><span class="chip chip-yellow">${i.status}</span></td>
+    </tr>`;
+  });
+  h += '</tbody></table>';
+  document.getElementById('mainArea').innerHTML = h;
+}
+
+async function loadAdminFeed() {
+  const wrap = document.getElementById('feedWrap');
+  if (!wrap) return;
+  try {
+    const all = (await Promise.all(FEEDS.map(f =>
+      fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(f.url)}`)
+        .then(r=>r.json())
+        .then(d => d.status==='ok' ? d.items.map(i=>({title:i.title,url:i.link,pub:new Date(i.pubDate),src:f.tag})) : [])
+        .catch(()=>[])
+    ))).flat().sort((a,b)=>b.pub-a.pub).slice(0,20);
+
+    if (!all.length) { wrap.innerHTML = '<div class="feed-load" style="color:#fbbf24">No articles found.</div>'; return; }
+    wrap.innerHTML = all.map((s,i) => `
+      <div class="feed-item">
+        <div class="fi-n">${i+1}</div>
+        <div>
+          <div class="fi-src">${s.src}</div>
+          <a class="fi-title" href="${s.url}" target="_blank" rel="noopener">${s.title}</a>
+          <div class="fi-meta">📆 ${s.pub.toLocaleDateString()} ${s.pub.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+      </div>`).join('');
+  } catch { wrap.innerHTML = '<div class="feed-load" style="color:#f87171">Could not load feed.</div>'; }
+}
+
+// ─── MODULE MODAL ────────────────────────────────────────────────
+let openModId = null;
+async function openModule(id, title) {
+  const data = await apiFetch('/api/modules');
+  const mod = data.modules.find(m => m.id === id);
+  document.getElementById('modTitle').textContent = mod.icon + ' ' + mod.title;
+  document.getElementById('modBody').innerHTML = mod.content;
+  document.getElementById('modModal').classList.add('open');
+  openModId = id;
+}
+function closeModal() { document.getElementById('modModal').classList.remove('open'); openModId = null; }
+async function markDone() {
+  if (!openModId) return;
+  await apiFetch('/api/modules/' + openModId + '/complete', 'POST');
+  closeModal();
+  const d = await apiFetch('/api/modules');
+  renderLearn(d);
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────
+async function apiFetch(url, method='GET', body=null) {
+  const opts = { method, headers:{'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if (res.status === 401) { window.location.href = '/'; return {}; }
+  return res.json();
+}
+</script>
+</body>
+</html>
